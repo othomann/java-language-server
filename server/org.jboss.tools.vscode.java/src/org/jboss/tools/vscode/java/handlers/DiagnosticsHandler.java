@@ -5,6 +5,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import org.eclipse.core.resources.IResource;
+import org.eclipse.jdt.core.ICompilationUnit;
 import org.eclipse.jdt.core.IProblemRequestor;
 import org.eclipse.jdt.core.compiler.IProblem;
 import org.eclipse.jdt.internal.compiler.problem.DefaultProblem;
@@ -16,34 +18,34 @@ import com.thetransactioncompany.jsonrpc2.JSONRPC2Notification;
 public class DiagnosticsHandler implements IProblemRequestor {
 	
 	private final List<IProblem> problems;
-	private final String uri;
+	private final IResource resource;
 	private final JsonRpcConnection connection;
 	
-	public DiagnosticsHandler(JsonRpcConnection conn, String uri) {
+	public DiagnosticsHandler(JsonRpcConnection conn, IResource resource) {
 		problems = new ArrayList<IProblem>();
-		this.uri = uri;
+		this.resource = resource;
 		this.connection = conn;
 	}
 
 	@Override
 	public void acceptProblem(IProblem problem) {
-		JavaLanguageServerPlugin.logInfo("accept problem for "+ this.uri);
+		JavaLanguageServerPlugin.logInfo("accept problem for "+ this.resource.getName());
 		problems.add(problem);
 	}
 
 	@Override
 	public void beginReporting() {
-		JavaLanguageServerPlugin.logInfo("begin problem for "+ this.uri);
+		JavaLanguageServerPlugin.logInfo("begin problem for "+ this.resource.getName());
 		problems.clear();
 
 	}
 
 	@Override
 	public void endReporting() {
-		JavaLanguageServerPlugin.logInfo("end reporting for "+ this.uri);
+		JavaLanguageServerPlugin.logInfo("end reporting for "+ this.resource.getName());
 		JSONRPC2Notification notification = new JSONRPC2Notification("textDocument/publishDiagnostics");
 		Map<String, Object> params = new HashMap<String, Object>();
-		params.put("uri",this.uri);
+		params.put("uri","file://" + this.resource.getLocationURI().getPath());
 		params.put("diagnostics",toDiagnosticsArray());
 		notification.setNamedParams(params);
 		this.connection.sendNotification(notification);

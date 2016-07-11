@@ -10,11 +10,13 @@ import org.eclipse.core.runtime.Platform;
 import org.eclipse.core.runtime.Status;
 import org.eclipse.jdt.core.IBuffer;
 import org.eclipse.jdt.core.ICompilationUnit;
+import org.eclipse.jdt.core.IProblemRequestor;
 import org.eclipse.jdt.core.WorkingCopyOwner;
 import org.jboss.tools.vscode.ipc.IPC;
 import org.jboss.tools.vscode.ipc.JsonRpcConnection;
 import org.jboss.tools.vscode.ipc.RequestHandler;
 import org.jboss.tools.vscode.java.handlers.CompletionHandler;
+import org.jboss.tools.vscode.java.handlers.DiagnosticsHandler;
 import org.jboss.tools.vscode.java.handlers.DocumentHighlightHandler;
 import org.jboss.tools.vscode.java.handlers.DocumentLifeCycleHandler;
 import org.jboss.tools.vscode.java.handlers.DocumentSymbolHandler;
@@ -47,6 +49,15 @@ public class JavaLanguageServerPlugin implements BundleActivator {
 	 */
 	public void start(BundleContext bundleContext) throws Exception {
 		JavaLanguageServerPlugin.context = bundleContext;
+		pm = new ProjectsManager();
+		
+		connection = new JsonRpcConnection(new IPC());
+		connection.addHandlers(handlers());
+		connection.connect();
+		
+		logHandler = new LogHandler();
+		logHandler.install(connection);
+		
 		WorkingCopyOwner.setPrimaryBufferProvider(new WorkingCopyOwner() {
 			@Override
 			public IBuffer createBuffer(ICompilationUnit workingCopy) {
@@ -57,15 +68,6 @@ public class JavaLanguageServerPlugin implements BundleActivator {
 				return DocumentAdapter.Null;
 			}
 		});
-		
-		pm = new ProjectsManager();
-		
-		connection = new JsonRpcConnection(new IPC());
-		connection.addHandlers(handlers());
-		connection.connect();
-		
-		logHandler = new LogHandler();
-		logHandler.install(connection);
 	}
 	
 	/**
@@ -74,15 +76,15 @@ public class JavaLanguageServerPlugin implements BundleActivator {
 	private List<RequestHandler> handlers() {
 		List<RequestHandler> handlers = new ArrayList<RequestHandler>();
 		handlers.add(new ExtensionLifeCycleHandler(pm));
-		handlers.add(new DocumentLifeCycleHandler());
+		handlers.add(new DocumentLifeCycleHandler(this.connection));
 		handlers.add(new CompletionHandler());
 		handlers.add(new HoverHandler());
 		handlers.add(new NavigateToDefinitionHandler());
 		handlers.add(new WorkspaceEventsHandler(pm));
 		handlers.add(new DocumentSymbolHandler());
 		handlers.add(new FindSymbolsHandler());
-		handlers.add(new ReferencesHandler(dm));
-		handlers.add(new DocumentHighlightHandler(dm));
+		handlers.add(new ReferencesHandler());
+		handlers.add(new DocumentHighlightHandler());
 		return handlers;
 	}
 
@@ -119,5 +121,4 @@ public class JavaLanguageServerPlugin implements BundleActivator {
 	public static void logException(String message, Throwable ex) {
 		log(new Status(IStatus.ERROR, context.getBundle().getSymbolicName(), message, ex));
 	}
-	
 }
