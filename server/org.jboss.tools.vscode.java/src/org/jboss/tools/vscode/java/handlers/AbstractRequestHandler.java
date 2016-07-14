@@ -9,6 +9,8 @@ import org.eclipse.core.resources.IFile;
 import org.eclipse.core.resources.IResource;
 import org.eclipse.core.resources.ResourcesPlugin;
 import org.eclipse.core.runtime.Path;
+import org.eclipse.jdt.core.IBuffer;
+import org.eclipse.jdt.core.IClassFile;
 import org.eclipse.jdt.core.ICompilationUnit;
 import org.eclipse.jdt.core.IJavaElement;
 import org.eclipse.jdt.core.ISourceRange;
@@ -113,5 +115,24 @@ public abstract class AbstractRequestHandler implements RequestHandler {
 		String uri = resource.getLocation().toFile().toURI().toString();
 		return uri.replaceFirst("file:/([^/])", "file:///$1");
 	}	
+	
+	protected Location getLocation(IClassFile unit, int offset, int length) throws JavaModelException, URISyntaxException {
+		Location result = new Location();
+		result.setUri(new URI("jdtid", unit.getHandleIdentifier(), "").toString());
+		IBuffer buffer = unit.getBuffer();
+		int[] loc = JsonRpcHelpers.toLine(buffer, offset);
+		int[] endLoc = JsonRpcHelpers.toLine(buffer, offset + length);
+
+		if (loc != null) {
+			result.setLine(loc[0]);
+			result.setColumn(loc[1]);
+		}
+		if (endLoc != null) {
+			result.setEndLine(endLoc[0]);
+			result.setEndColumn(endLoc[1]);
+		}
+		return result;
+	}	
+
 }
  

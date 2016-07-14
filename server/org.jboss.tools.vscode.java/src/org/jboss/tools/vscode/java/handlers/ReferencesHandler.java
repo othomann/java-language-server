@@ -1,5 +1,6 @@
 package org.jboss.tools.vscode.java.handlers;
 
+import java.net.URISyntaxException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -8,6 +9,7 @@ import java.util.Map;
 import org.eclipse.core.resources.ResourcesPlugin;
 import org.eclipse.core.runtime.CoreException;
 import org.eclipse.core.runtime.NullProgressMonitor;
+import org.eclipse.jdt.core.IClassFile;
 import org.eclipse.jdt.core.ICompilationUnit;
 import org.eclipse.jdt.core.IJavaElement;
 import org.eclipse.jdt.core.IJavaProject;
@@ -48,40 +50,56 @@ public class ReferencesHandler extends AbstractRequestHandler {
 		try {
 			IJavaElement elementToSearch = findElementAtSelection(resolveCompilationUnit(request), params.position.line,
 					params.position.character);
+			if (elementToSearch != null) {
 
-			SearchPattern pattern = SearchPattern.createPattern(elementToSearch, IJavaSearchConstants.REFERENCES);
-			final List<Map<String, Object>> result = new ArrayList<Map<String, Object>>();
-			engine.search(pattern, new SearchParticipant[] { SearchEngine.getDefaultSearchParticipant() },
-					createSearchScope(), new SearchRequestor() {
+				SearchPattern pattern = SearchPattern.createPattern(elementToSearch, IJavaSearchConstants.REFERENCES);
+				final List<Map<String, Object>> result = new ArrayList<Map<String, Object>>();
+				engine.search(pattern, new SearchParticipant[] { SearchEngine.getDefaultSearchParticipant() },
+						createSearchScope(), new SearchRequestor() {
 
-						@Override
-						public void acceptSearchMatch(SearchMatch match) throws CoreException {
-							Object o = match.getElement();
-							if (o instanceof IJavaElement) {
-								IJavaElement element = (IJavaElement) o;
-								ICompilationUnit compilationUnit = (ICompilationUnit) element
-										.getAncestor(IJavaElement.COMPILATION_UNIT);
-								if (compilationUnit == null) {
-									return;
+							@Override
+							public void acceptSearchMatch(SearchMatch match) throws CoreException {
+								Object o = match.getElement();
+								if (o instanceof IJavaElement) {
+									IJavaElement element = (IJavaElement) o;
+									Location location = null;
+									ICompilationUnit compilationUnit = (ICompilationUnit) element
+											.getAncestor(IJavaElement.COMPILATION_UNIT);
+									if (compilationUnit != null) {
+										location = getLocation(compilationUnit, match.getOffset(), match.getLength());
+									} else {
+										IClassFile cf = (IClassFile) element.getAncestor(IJavaElement.CLASS_FILE);
+										if (cf != null) {
+											try {
+												location = getLocation(cf, match.getOffset(), match.getLength());
+											} catch (URISyntaxException e) {
+												// TODO Auto-generated catch
+												// block
+												e.printStackTrace();
+											}
+										}
+
+									}
+									if (location != null) {
+										Map<String, Object> l = new HashMap<String, Object>();
+										l.put("uri", location.getUri());
+										l.put("range", JsonRpcHelpers.convertRange(location.getLine(),
+												location.getColumn(), location.getEndLine(), location.getEndColumn()));
+										result.add(l);
+									}
+
 								}
-								Location location = getLocation(compilationUnit, match.getOffset(),
-										match.getLength());
-								Map<String, Object> l = new HashMap<String, Object>();
-								l.put("uri", location.getUri());
-								l.put("range", JsonRpcHelpers.convertRange(location.getLine(), location.getColumn(),
-										location.getEndLine(), location.getEndColumn()));
-								result.add(l);
 
 							}
+						}, new NullProgressMonitor());
 
-						}
-					}, new NullProgressMonitor());
-
-			response.setResult(result);
+				response.setResult(result);
+			}
 		} catch (CoreException e) {
 			// TODO Auto-generated catch block
 			e.printStackTrace();
 		}
+
 		return response;
 	}
 
@@ -92,8 +110,8 @@ public class ReferencesHandler extends AbstractRequestHandler {
 			return null;
 		return elements[0];
 
-	}	
-	
+	}
+
 	@SuppressWarnings("unchecked")
 	private ReferenceParams readParams(JSONRPC2Request request) {
 		ReferenceParams result = new ReferenceParams();
@@ -128,7 +146,8 @@ public class ReferencesHandler extends AbstractRequestHandler {
 
 	private IJavaSearchScope createSearchScope() throws JavaModelException {
 		IJavaProject[] projects = JavaCore.create(ResourcesPlugin.getWorkspace().getRoot()).getJavaProjects();
-		return SearchEngine.createJavaSearchScope(projects, IJavaSearchScope.SOURCES);
+		return SearchEngine.createJavaSearchScope(projects,
+				IJavaSearchScope.SOURCES | IJavaSearchScope.APPLICATION_LIBRARIES);
 	}
 }
 
@@ -160,4 +179,3 @@ class ReferenceContext {
 	 */
 	boolean includeDeclaration;
 }
-

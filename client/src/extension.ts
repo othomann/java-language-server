@@ -1,4 +1,3 @@
-
 'use strict';
 
 import * as path from 'path';
@@ -8,20 +7,16 @@ import * as fs from 'fs';
 var electron = require('./electron_j');
 var rimraf = require('rimraf');
 
-import { workspace, Disposable, ExtensionContext, StatusBarItem, window, StatusBarAlignment, commands, ViewColumn, Uri} from 'vscode';
-import { LanguageClient, LanguageClientOptions, SettingMonitor, ServerOptions, NotificationType, Position as LSPosition, Location as LSLocation, Protocol2Code} from 'vscode-languageclient';
+
+import { workspace, Disposable, ExtensionContext, StatusBarItem, window, StatusBarAlignment, commands, 
+	ViewColumn, Event, Uri, CancellationToken, TextDocumentContentProvider} from 'vscode';
+import { LanguageClient, LanguageClientOptions, SettingMonitor, ServerOptions, NotificationType, Position as LSPosition, Location as LSLocation, Protocol2Code } from 'vscode-languageclient';
+import { StatusNotification, ClassFileContentsRequest, ClassFileContentParams } from './protocol'
+
 
 declare var v8debug;
 var DEBUG =( typeof v8debug === 'object');
 
-interface StatusReport {
-	message: string;
-	type: string;
-}
-
-namespace StatusNotification {
-	export const type: NotificationType<StatusReport> = { get method() { return 'language/status'; } };
-}
 
 function runJavaServer(){
 	return new Promise(function(resolve, reject){
@@ -61,6 +56,19 @@ function runJavaServer(){
 
 export function activate(context: ExtensionContext) {
 
+	let item = window.createStatusBarItem(StatusBarAlignment.Right, Number.MIN_VALUE);
+	item.text= "Init..."
+ 	window.onDidChangeActiveTextEditor((editor) =>{
+		if(editor && editor.document && editor.document.languageId === "java"){
+			item.show();
+		} else{
+			item.hide();
+		}
+	});
+	if (window.activeTextEditor && window.activeTextEditor.document && window.activeTextEditor.document.languageId === "java") {
+		item.show();
+	}
+	
 	//clean old workspaces 
 	//TODO: run this during shutdown.
 	cleanWorkspaces();
@@ -82,8 +90,8 @@ export function activate(context: ExtensionContext) {
 		}
 	}
 	
-	let item = window.createStatusBarItem(StatusBarAlignment.Right, Number.MIN_VALUE);
-    
+
+   
 	// Create the language client and start the client.
 	let languageClient = new LanguageClient('java','Java Language Support', serverOptions, clientOptions);
 	languageClient.onNotification(StatusNotification.type, (report) => {
@@ -112,13 +120,17 @@ export function activate(context: ExtensionContext) {
 	commands.registerCommand("java.show.references", (uri:string, position: LSPosition, locations:LSLocation[])=>{
 		commands.executeCommand('editor.action.showReferences', Uri.parse(uri), Protocol2Code.asPosition(position), locations.map(Protocol2Code.asLocation));
 	});
-	window.onDidChangeActiveTextEditor((editor) =>{
-		if(editor && editor.document && editor.document.languageId === "java"){
-			item.show();
-		} else{
-			item.hide();
+	let provider: TextDocumentContentProvider= <TextDocumentContentProvider> {
+		onDidChange: null,
+
+		provideTextDocumentContent: (uri: Uri, token: CancellationToken): Thenable<string> => {
+			return languageClient.sendRequest(ClassFileContentsRequest.type, { uri: uri.toString() }, token).then((v: string):string => { 
+				return v
+			});
 		}
-	});
+
+	};
+	workspace.registerTextDocumentContentProvider("jdtid", provider)
 
 	let disposable = languageClient.start();
 	
