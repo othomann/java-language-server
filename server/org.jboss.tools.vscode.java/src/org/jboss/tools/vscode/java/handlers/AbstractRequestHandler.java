@@ -2,8 +2,6 @@ package org.jboss.tools.vscode.java.handlers;
 
 import java.net.URI;
 import java.net.URISyntaxException;
-import java.nio.file.FileSystem;
-import java.nio.file.FileSystems;
 
 import org.eclipse.core.resources.IFile;
 import org.eclipse.core.resources.IResource;
@@ -114,11 +112,16 @@ public abstract class AbstractRequestHandler implements RequestHandler {
 	public static String getFileURI(IResource resource) {
 		String uri = resource.getLocation().toFile().toURI().toString();
 		return uri.replaceFirst("file:/([^/])", "file:///$1");
-	}	
+	}
 	
 	protected Location getLocation(IClassFile unit, int offset, int length) throws JavaModelException, URISyntaxException {
 		Location result = new Location();
-		result.setUri(new URI("jdtid", unit.getHandleIdentifier(), "").toString());
+		
+		String packageName = unit.getParent().getElementName();
+		String jarName = unit.getParent().getParent().getElementName();
+		String uriString = new URI("jdt", "contents", "/" + jarName + "/" + packageName + "/" + unit.getElementName(), unit.getHandleIdentifier(), null).toASCIIString();
+		result.setUri(uriString);
+		
 		IBuffer buffer = unit.getBuffer();
 		int[] loc = JsonRpcHelpers.toLine(buffer, offset);
 		int[] endLoc = JsonRpcHelpers.toLine(buffer, offset + length);

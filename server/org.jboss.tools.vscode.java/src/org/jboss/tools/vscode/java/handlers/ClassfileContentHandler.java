@@ -5,7 +5,6 @@ import java.net.URISyntaxException;
 
 import org.eclipse.jdt.core.IBuffer;
 import org.eclipse.jdt.core.IClassFile;
-import org.eclipse.jdt.core.ICompilationUnit;
 import org.eclipse.jdt.core.IJavaElement;
 import org.eclipse.jdt.core.JavaCore;
 import org.eclipse.jdt.core.JavaModelException;
@@ -30,16 +29,17 @@ public class ClassfileContentHandler implements RequestHandler {
 		JSONRPC2Response response = new JSONRPC2Response(request.getID());
 		try {
 			URI uri = new URI(uriString);
-
-			String elementId = uri.getSchemeSpecificPart();
-			IJavaElement element = JavaCore.create(elementId);
-			IClassFile cf = (IClassFile) element.getAncestor(IJavaElement.CLASS_FILE);
-			if (cf != null) {
-				IBuffer buffer = cf.getBuffer();
-				if (buffer != null) {
-					response.setResult(buffer.getContents());
-					JavaLanguageServerPlugin.logInfo("Completion request completed");
-					return response;
+			if (uri.getAuthority().equals("contents")) {
+				String handleId = uri.getQuery();
+				IJavaElement element = JavaCore.create(handleId);
+				IClassFile cf = (IClassFile) element.getAncestor(IJavaElement.CLASS_FILE);
+				if (cf != null) {
+					IBuffer buffer = cf.getBuffer();
+					if (buffer != null) {
+						response.setResult(buffer.getContents());
+						JavaLanguageServerPlugin.logInfo("Completion request completed");
+						return response;
+					}
 				}
 			}
 		} catch (URISyntaxException e) {

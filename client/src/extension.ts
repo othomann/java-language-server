@@ -124,13 +124,13 @@ export function activate(context: ExtensionContext) {
 		onDidChange: null,
 
 		provideTextDocumentContent: (uri: Uri, token: CancellationToken): Thenable<string> => {
-			return languageClient.sendRequest(ClassFileContentsRequest.type, { uri: uri.toString() }, token).then((v: string):string => { 
-				return v
+			return languageClient.sendRequest(ClassFileContentsRequest.type, { uri: uri.toString() }, token).then(v => { 
+				return v || '';
 			});
 		}
 
 	};
-	workspace.registerTextDocumentContentProvider("jdtid", provider)
+	workspace.registerTextDocumentContentProvider("jdt", provider);
 
 	let disposable = languageClient.start();
 	
