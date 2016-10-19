@@ -8,7 +8,7 @@
  * Contributors:
  *     Red Hat Inc. - initial API and implementation
  *******************************************************************************/
-package org.jboss.tools.vscode.java.internal;
+package org.jboss.tools.vscode.java.internal.contentassist;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -23,6 +23,7 @@ import org.jboss.tools.langs.CompletionItem;
 import org.jboss.tools.vscode.java.internal.handlers.CompletionResolveHandler;
 
 public final class CompletionProposalRequestor extends CompletionRequestor {
+
 	private final List<CompletionItem> proposals;
 	private final ICompilationUnit unit;
 	private CompletionProposalReplacementProvider proposalProvider;
@@ -40,11 +41,12 @@ public final class CompletionProposalRequestor extends CompletionRequestor {
 		final CompletionItem $ = new CompletionItem();
 		$.setKind(mapKind(proposal.getKind()));
 		Map<String, String> data = new HashMap<>();
+		// append data field so that resolve request can use it.
 		data.put(CompletionResolveHandler.DATA_FIELD_URI,unit.getResource().getLocationURI().toString());
 		$.setData(data);
 		this.descriptionProvider.updateDescription(proposal, $);
-		StringBuilder replacement = this.proposalProvider.createReplacement(proposal,' ',new ArrayList<Integer>());
-		$.setInsertText(replacement.toString());
+		this.proposalProvider.updateReplacement(proposal,$, ' ',new ArrayList<Integer>());
+		$.setSortText(SortTextHelper.computeSortText(proposal));
 		proposals.add($);
 	}
 
@@ -117,4 +119,7 @@ public final class CompletionProposalRequestor extends CompletionRequestor {
 		//				  File = 17,
 		//				  Reference = 18
 	}
+
+
+
 }
