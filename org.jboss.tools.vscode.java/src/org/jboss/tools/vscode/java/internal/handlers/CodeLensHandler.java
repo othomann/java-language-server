@@ -85,7 +85,7 @@ public class CodeLensHandler {
 				return lens;
 			}
 			Map<String, Object> position = (Map<String, Object>) data.get(1);
-			IJavaElement element = findElementAtSelection(unit,  ((Double)position.get("line")).intValue(), ((Double)position.get("character")).intValue());
+			IJavaElement element = JDTUtils.findElementAtSelection(unit,  ((Double)position.get("line")).intValue(), ((Double)position.get("character")).intValue());
 			List<Location> locations = findReferences(element);
 			int nReferences = locations.size();
 			lens.setCommand(new Command().withTitle(nReferences == 1 ? "1 reference" : nReferences + " references")
@@ -97,16 +97,11 @@ public class CodeLensHandler {
 		return lens;
 	}
 
-	private IJavaElement findElementAtSelection(ICompilationUnit unit, int line, int column) throws JavaModelException {
-		IJavaElement[] elements = unit.codeSelect(JsonRpcHelpers.toOffset(unit.getBuffer(), line, column), 0);
-
-		if (elements == null || elements.length != 1)
-			return null;
-		return elements[0];
-
-	}
-
 	private List<Location> findReferences(IJavaElement element) throws JavaModelException, CoreException {
+		if (element == null) {
+			return Collections.emptyList();
+		}
+
 		SearchPattern pattern = SearchPattern.createPattern(element, IJavaSearchConstants.REFERENCES);
 		final List<Location> result = new ArrayList<>();
 		SearchEngine engine = new SearchEngine();
@@ -135,7 +130,7 @@ public class CodeLensHandler {
 	}
 
 	private List<CodeLens> getCodeLensSymbols(ICompilationUnit unit) {
-		if(unit == null ) return Collections.emptyList();
+		if(unit == null || !unit.getResource().exists()) return Collections.emptyList();
 		try {
 			IJavaElement[] elements = unit.getChildren();
 			ArrayList<CodeLens> lenses = new ArrayList<>(elements.length);

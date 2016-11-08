@@ -14,6 +14,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import org.jboss.tools.langs.LogMessageParams;
+import org.jboss.tools.langs.ShowMessageParams;
 import org.jboss.tools.langs.base.LSPMethods;
 import org.jboss.tools.langs.base.LSPServer;
 import org.jboss.tools.langs.base.NotificationMessage;
@@ -87,6 +88,21 @@ public class JavaClientConnection extends LSPServer{
 	}
 
 	/**
+	 * Sends the message to the client to be displayed on a UI element.
+	 *
+	 * @param type
+	 * @param msg
+	 */
+	public void showNotificationMessage(MessageType type, String msg){
+		if(msg == null ) return;
+		NotificationMessage<ShowMessageParams> message = new NotificationMessage<>();
+		message.setMethod(LSPMethods.WINDOW_SHOW_MESSAGE.getMethod());
+		message.setParams(new ShowMessageParams().withMessage(msg)
+				.withType(type.getType()));
+		send(message);
+	}
+
+	/**
 	 * Sends a status to the client to be presented to users
 	 * @param msg The status to send back to the client
 	 */
@@ -127,7 +143,7 @@ public class JavaClientConnection extends LSPServer{
 		$.add(new CompletionHandler());
 		$.add(new CompletionResolveHandler());
 		$.add(new NavigateToDefinitionHandler());
-		$.add(new WorkspaceEventsHandler(this.projectsManager,this));
+
 		$.add(new DocumentSymbolHandler());
 		$.add(new WorkspaceSymbolHandler());
 		$.add(new ReferencesHandler());
@@ -154,6 +170,7 @@ public class JavaClientConnection extends LSPServer{
 		$.add(dh.new OpenHandler());
 		$.add(dh.new SaveHandler());
 		$.add(new ExitHandler());
+		$.add(new WorkspaceEventsHandler(this.projectsManager,this));
 		return $;
 	}
 

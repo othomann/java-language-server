@@ -55,12 +55,16 @@ public final class JDTUtils {
 		}
 		if (path != null) {
 			IFile resource = ResourcesPlugin.getWorkspace().getRoot().getFileForLocation(Path.fromOSString(path));
+			//Check if this is a Java project. In some cases project import fails
+			// to recognize project type and creates a general project
+			if(resource == null || !ProjectUtils.isJavaProject(resource.getProject())){
+				return null;
+			}
 			IJavaElement element = JavaCore.create(resource);
 			if (element instanceof ICompilationUnit) {
 				return (ICompilationUnit)element;
 			}
 		}
-
 		return null;
 	}
 
@@ -87,7 +91,6 @@ public final class JDTUtils {
 			return cf;
 		}
 		return null;
-
 	}
 
 	/**
@@ -239,8 +242,27 @@ public final class JDTUtils {
 	 * @return
 	 */
 	public static String getFileURI(IResource resource) {
-		String uri = resource.getLocation().toFile().toURI().toString();
+		String uri = resource.getRawLocationURI().toString();
 		return uri.replaceFirst("file:/([^/])", "file:///$1");
+	}
+
+	public static IJavaElement findElementAtSelection(ITypeRoot unit, int line, int column) throws JavaModelException {
+		IJavaElement[] elements = findElementsAtSelection(unit, line, column);
+		if (elements != null && elements.length == 1) {
+			return elements[0];
+		}
+		return null;
+	}
+
+	public static IJavaElement[] findElementsAtSelection(ITypeRoot unit, int line, int column) throws JavaModelException {
+		if (unit == null) {
+			return null;
+		}
+		int offset = JsonRpcHelpers.toOffset(unit.getBuffer(), line, column);
+		if (offset > -1) {
+			return unit.codeSelect(offset, 0);
+		}
+		return null;
 	}
 
 }

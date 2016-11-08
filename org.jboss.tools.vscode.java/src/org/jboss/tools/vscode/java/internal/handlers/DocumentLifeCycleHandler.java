@@ -136,13 +136,13 @@ public class DocumentLifeCycleHandler {
 
 	private void handleOpen(DidOpenTextDocumentParams params) {
 		ICompilationUnit unit = JDTUtils.resolveCompilationUnit(params.getTextDocument().getUri());
-		if (unit == null) {
+		if (unit == null || unit.getResource() == null) {
 			return;
 		}
 		try {
 			// The open event can happen before the workspace element added event when a new file is added.
 			// checks if the underlying resource exists and refreshes to sync the newly created file.
-			if(unit.getResource() != null && !unit.getResource().isAccessible()){
+			if(!unit.getResource().isAccessible()){
 				try {
 					unit.getResource().refreshLocal(IResource.DEPTH_ONE, new NullProgressMonitor());
 				} catch (CoreException e) {
@@ -150,12 +150,13 @@ public class DocumentLifeCycleHandler {
 				}
 			}
 
+			unit.becomeWorkingCopy(new DiagnosticsHandler(connection, unit.getUnderlyingResource()), null);
 			IBuffer buffer = unit.getBuffer();
-			if(buffer != null)
+			if(buffer != null) {
 				buffer.setContents(params.getTextDocument().getText());
+			}
 
 			// TODO: wire up cancellation.
-			unit.becomeWorkingCopy(new DiagnosticsHandler(connection, unit.getUnderlyingResource()), null);
 			unit.reconcile();
 		} catch (JavaModelException e) {
 			JavaLanguageServerPlugin.logException("Creating working copy ",e);
@@ -180,13 +181,12 @@ public class DocumentLifeCycleHandler {
 				Range range = changeEvent.getRange();
 
 				int startOffset = document.getLineOffset(range.getStart().getLine().intValue()) + range.getStart().getCharacter().intValue();
-				int endOffset = document.getLineOffset(range.getEnd().getLine().intValue()) + range.getEnd().getCharacter().intValue();
-				int length = endOffset - startOffset;
+				int length = changeEvent.getRangeLength().intValue();
 
 				TextEdit edit = null;
 				if (length == 0) {
 					edit = new InsertEdit(startOffset, changeEvent.getText());
-				} else if (changeEvent.getText().length() == 0) {
+				} else if (changeEvent.getText().isEmpty()){
 					edit = new DeleteEdit(startOffset, length);
 				} else {
 					edit = new ReplaceEdit(startOffset, length, changeEvent.getText());
