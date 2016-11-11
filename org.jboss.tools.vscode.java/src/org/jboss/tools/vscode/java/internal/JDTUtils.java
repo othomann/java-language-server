@@ -14,6 +14,8 @@ import java.io.File;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.nio.file.Paths;
+import java.util.HashMap;
+import java.util.Map;
 
 import org.eclipse.core.resources.IContainer;
 import org.eclipse.core.resources.IFile;
@@ -34,11 +36,13 @@ import org.eclipse.jdt.core.IClassFile;
 import org.eclipse.jdt.core.ICompilationUnit;
 import org.eclipse.jdt.core.IJavaElement;
 import org.eclipse.jdt.core.IJavaProject;
+import org.eclipse.jdt.core.IProblemRequestor;
 import org.eclipse.jdt.core.ISourceRange;
 import org.eclipse.jdt.core.ISourceReference;
 import org.eclipse.jdt.core.ITypeRoot;
 import org.eclipse.jdt.core.JavaCore;
 import org.eclipse.jdt.core.JavaModelException;
+import org.eclipse.jdt.core.WorkingCopyOwner;
 import org.eclipse.jdt.core.dom.AST;
 import org.eclipse.jdt.core.dom.ASTParser;
 import org.eclipse.jdt.core.dom.CompilationUnit;
@@ -46,6 +50,8 @@ import org.eclipse.jdt.core.dom.PackageDeclaration;
 import org.jboss.tools.langs.Location;
 import org.jboss.tools.langs.Position;
 import org.jboss.tools.langs.Range;
+import org.jboss.tools.vscode.internal.ipc.MessageType;
+import org.jboss.tools.vscode.java.internal.handlers.DiagnosticsHandler;
 import org.jboss.tools.vscode.java.internal.handlers.JsonRpcHelpers;
 
 import com.google.common.base.Charsets;
@@ -53,15 +59,59 @@ import com.google.common.io.Files;
 
 /**
  * General utilities for working with JDT APIs
+ *
  * @author Gorkem Ercan
  *
  */
 public final class JDTUtils {
 
+	static {
+		WorkingCopyOwner.setPrimaryBufferProvider(new WorkingCopyOwner() {
+			@Override
+			public IBuffer createBuffer(ICompilationUnit workingCopy) {
+				ICompilationUnit original= workingCopy.getPrimary();
+				IResource resource= original.getResource();
+				if (resource instanceof IFile)
+					return new DocumentAdapter(workingCopy, (IFile)resource);
+				return DocumentAdapter.Null;
+			}
+		});
+	}
+
+	JavaClientConnection connection;
+
+	Map<String, ITypeRoot> cache = new HashMap<>();
+
 	/**
-	 * Given the uri returns a {@link ICompilationUnit}.
-	 * May return null if it can not associate the uri with a Java
-	 * file.
+	 * Returns the singleton instance of JDTUtils
+	 *
+	 * @return the singleton instance of JDTUtils
+	 */
+	public static JDTUtils getInstance(JavaClientConnection connection) {
+		return singleton = new JDTUtils(connection);
+	}
+
+	/**
+	 * Returns the singleton instance of JDTUtils
+	 *
+	 * @return the singleton instance of JDTUtils
+	 */
+	public static JDTUtils getInstance() {
+		return singleton;
+	}
+
+	/**
+	 * The singleton instance
+	 */
+	private static JDTUtils singleton = null;
+
+	private JDTUtils(JavaClientConnection connection) {
+		this.connection = connection;
+	}
+
+	/**
+	 * Given the uri returns a {@link ICompilationUnit}. May return null if it
+	 * can not associate the uri with a Java file.
 	 *
 	 * @param uriString
 	 * @return compilation unit
@@ -80,34 +130,47 @@ public final class JDTUtils {
 			JavaLanguageServerPlugin.logException("Failed to resolve "+uriString, e);
 		}
 
-		IFile resource= null;
 		if (uri != null) {
-			resource = findFile(uri);
-			if(resource == null || !ProjectUtils.isJavaProject(resource.getProject())){
+			JDTUtils instance = getInstance();
+			if (instance == null) {
 				return null;
 			}
-			IJavaElement element = JavaCore.create(resource);
-			if (element instanceof ICompilationUnit) {
-				return (ICompilationUnit)element;
-			}
+			return instance.getCompilationUnit(uri);
 		}
-		if (resource == null) {
-			return getFakeCompilationUnit(uriString);
-		}
-		//the resource is not null but no compilation unit could be created (eg. project not ready yet)
+
 		return null;
 	}
 
-	static ICompilationUnit getFakeCompilationUnit(String uriString) {
+	/**
+	 * @param unit
+	 */
+	private synchronized void discardUnit(String path) {
+		ITypeRoot cachedValue = this.cache.remove(path);
+		if (cachedValue != null && cachedValue instanceof ICompilationUnit) {
+			try {
+				((ICompilationUnit) cachedValue).discardWorkingCopy();
+			} catch (JavaModelException e) {
+				JavaLanguageServerPlugin.logException("Discard unit: " + path, e);
+			}
+		}
+		//the resource is not null but no compilation unit could be created (eg. project not ready yet)
+	}
+
+	/**
+	 * @param path
+	 * @return
+	 */
+	private synchronized ICompilationUnit getCompilationUnit(URI uri) {
+		ITypeRoot cachedValue = this.cache.get(uri.getPath());
+		if (cachedValue != null && cachedValue instanceof ICompilationUnit) {
+			return (ICompilationUnit) cachedValue;
+		}
+		return null;
+	}
+
+	private static ICompilationUnit getFakeCompilationUnit(URI uri) {
 		IProject project = JavaLanguageServerPlugin.getProjectsManager().getDefaultProject();
 		if (project == null || !project.isAccessible()) {
-			return null;
-		}
-		final URI uri;
-		try {
-			uri = new URI(uriString);
-		} catch (URISyntaxException e) {
-			JavaLanguageServerPlugin.logException("Failed to resolve "+uriString, e);
 			return null;
 		}
 		IJavaProject javaProject = JavaCore.create(project);
@@ -194,21 +257,21 @@ public final class JDTUtils {
 
 
 	/**
-	 * Given the uri returns a {@link IClassFile}.
-	 * May return null if it can not resolve the uri to a
-	 * library.
+	 * Given the uri returns a {@link IClassFile}. May return null if it can not
+	 * resolve the uri to a library.
 	 *
 	 * @see #toLocation(IClassFile, int, int)
-	 * @param uri with 'jdt' scheme
+	 * @param uri
+	 *            with 'jdt' scheme
 	 * @return class file
 	 */
-	public static IClassFile resolveClassFile(String uriString){
+	public static IClassFile resolveClassFile(String uriString) {
 		URI uri = null;
 		try {
 			uri = new URI(uriString);
 			return resolveClassFile(uri);
 		} catch (URISyntaxException e) {
-			JavaLanguageServerPlugin.logException("Failed to resolve "+uriString, e);
+			JavaLanguageServerPlugin.logException("Failed to resolve " + uriString, e);
 		}
 		return null;
 
@@ -226,12 +289,28 @@ public final class JDTUtils {
 	public static IClassFile resolveClassFile(URI uri){
 		if (uri != null && "jdt".equals(uri.getScheme()) && "contents".equals(uri.getAuthority())) {
 			String handleId = uri.getQuery();
-			IJavaElement element = JavaCore.create(handleId);
-			IClassFile cf = (IClassFile) element.getAncestor(IJavaElement.CLASS_FILE);
-			return cf;
+			JDTUtils instance = getInstance();
+			if (instance == null)
+				return null;
+			return instance.getClassFile(handleId);
 		}
 		return null;
 	}
+	/**
+	 * @param handleId
+	 * @return
+	 */
+	private synchronized IClassFile getClassFile(String handleId) {
+		ITypeRoot typeRoot = this.cache.get(handleId);
+		if (typeRoot != null && typeRoot instanceof IClassFile) {
+			return (IClassFile) typeRoot;
+		}
+		IJavaElement element = JavaCore.create(handleId);
+		IClassFile cf = (IClassFile) element.getAncestor(IJavaElement.CLASS_FILE);
+		this.cache.put(handleId, cf);
+		return cf;
+	}
+
 	/**
 	 * Convenience method that combines {@link #resolveClassFile(String)} and
 	 * {@link #resolveCompilationUnit(String)}.
@@ -247,20 +326,20 @@ public final class JDTUtils {
 			}
 			return resolveCompilationUnit(uriString);
 		} catch (URISyntaxException e) {
-			JavaLanguageServerPlugin.logException("Failed to resolve "+uriString, e);
+			JavaLanguageServerPlugin.logException("Failed to resolve " + uriString, e);
 			return null;
 		}
 	}
 
 	/**
-	 * Creates a location for a given java element.
-	 * Element can be a {@link ICompilationUnit} or {@link IClassFile}
+	 * Creates a location for a given java element. Element can be a
+	 * {@link ICompilationUnit} or {@link IClassFile}
 	 *
 	 * @param element
 	 * @return location or null
 	 * @throws JavaModelException
 	 */
-	public static Location toLocation(IJavaElement element) throws JavaModelException{
+	public static Location toLocation(IJavaElement element) throws JavaModelException {
 		ICompilationUnit unit = (ICompilationUnit) element.getAncestor(IJavaElement.COMPILATION_UNIT);
 		IClassFile cf = (IClassFile) element.getAncestor(IJavaElement.CLASS_FILE);
 		if (unit == null && cf == null) {
@@ -268,10 +347,10 @@ public final class JDTUtils {
 		}
 		if (element instanceof ISourceReference) {
 			ISourceRange nameRange = ((ISourceReference) element).getNameRange();
-			if(cf == null){
-				return toLocation(unit,nameRange.getOffset(), nameRange.getLength());
-			}else{
-				return toLocation(cf,nameRange.getOffset(), nameRange.getLength());
+			if (cf == null) {
+				return toLocation(unit, nameRange.getOffset(), nameRange.getLength());
+			} else {
+				return toLocation(cf, nameRange.getOffset(), nameRange.getLength());
 			}
 		}
 		return null;
@@ -294,12 +373,10 @@ public final class JDTUtils {
 
 		Range range = new Range();
 		if (loc != null) {
-			range.withStart(new Position().withLine(loc[0])
-					.withCharacter(loc[1]));
+			range.withStart(new Position().withLine(loc[0]).withCharacter(loc[1]));
 		}
 		if (endLoc != null) {
-			range.withEnd(new Position().withLine(endLoc[0])
-					.withCharacter(endLoc[1]));
+			range.withEnd(new Position().withLine(endLoc[0]).withCharacter(endLoc[1]));
 		}
 		return result.withRange(range);
 	}
@@ -313,13 +390,14 @@ public final class JDTUtils {
 	 * @return location or null
 	 * @throws JavaModelException
 	 */
-	public static Location toLocation(IClassFile unit, int offset, int length) throws JavaModelException{
+	public static Location toLocation(IClassFile unit, int offset, int length) throws JavaModelException {
 		Location result = new Location();
 		String packageName = unit.getParent().getElementName();
 		String jarName = unit.getParent().getParent().getElementName();
 		String uriString = null;
 		try {
-			uriString = new URI("jdt", "contents", "/" + jarName + "/" + packageName + "/" + unit.getElementName(), unit.getHandleIdentifier(), null).toASCIIString();
+			uriString = new URI("jdt", "contents", "/" + jarName + "/" + packageName + "/" + unit.getElementName(),
+					unit.getHandleIdentifier(), null).toASCIIString();
 		} catch (URISyntaxException e) {
 			JavaLanguageServerPlugin.logException("Error generating URI for class ", e);
 		}
@@ -330,12 +408,10 @@ public final class JDTUtils {
 
 		Range range = new Range();
 		if (loc != null) {
-			range.withStart(new Position().withLine(loc[0])
-					.withCharacter(loc[1]));
+			range.withStart(new Position().withLine(loc[0]).withCharacter(loc[1]));
 		}
 		if (endLoc != null) {
-			range.withEnd(new Position().withLine(endLoc[0])
-					.withCharacter(endLoc[1]));
+			range.withEnd(new Position().withLine(endLoc[0]).withCharacter(endLoc[1]));
 		}
 		return result.withRange(range);
 	}
@@ -356,11 +432,9 @@ public final class JDTUtils {
 		int[] endLoc = JsonRpcHelpers.toLine(buffer, offset + length);
 
 		if (loc != null && endLoc != null) {
-			result.setStart(new Position().withLine(loc[0])
-					.withCharacter(loc[1]));
+			result.setStart(new Position().withLine(loc[0]).withCharacter(loc[1]));
 
-			result.setEnd(new Position().withLine(endLoc[0])
-					.withCharacter(endLoc[1]));
+			result.setEnd(new Position().withLine(endLoc[0]).withCharacter(endLoc[1]));
 
 		}
 		return result;
@@ -368,6 +442,7 @@ public final class JDTUtils {
 
 	/**
 	 * Returns uri for a compilation unit
+	 *
 	 * @param cu
 	 * @return
 	 */
@@ -377,6 +452,7 @@ public final class JDTUtils {
 
 	/**
 	 * Returns uri for a resource
+	 *
 	 * @param resource
 	 * @return
 	 */
@@ -428,4 +504,89 @@ public final class JDTUtils {
 		return null;
 	}
 
+	/**
+	 * @param uri
+	 * @return
+	 */
+	public static ICompilationUnit createCompilationUnit(String uriString) {
+		if (uriString == null) {
+			return null;
+		}
+		URI uri = null;
+		try {
+			uri = new URI(uriString);
+			if ("jdt".equals(uri.getScheme()) || !uri.isAbsolute()){
+				return null;
+			}
+		} catch (URISyntaxException e) {
+			JavaLanguageServerPlugin.logException("Failed to resolve: " + uriString, e);
+		}
+
+		if (uri != null) {
+			JDTUtils instance = getInstance();
+			if (instance == null) {
+				return null;
+			}
+			return instance.createUnit(uri);
+		}
+		return null;
+	}
+
+	/**
+	 * @param uri
+	 * @return
+	 */
+	private synchronized ICompilationUnit createUnit( URI uri) {
+		IJavaElement element = null;
+		IResource resource = findFile(uri);
+		if (resource == null) {
+			// unit not attached to a project yet
+			element = getFakeCompilationUnit(uri);
+		} else {
+			element = JavaCore.create(resource);
+		}
+		if (element instanceof ICompilationUnit) {
+			try {
+				ICompilationUnit unit = (ICompilationUnit) element;
+				unit.becomeWorkingCopy(getProblemRequestor(unit), new NullProgressMonitor());
+				this.cache.put(uri.getPath(), unit);
+				return unit;
+			} catch (JavaModelException e) {
+				JavaLanguageServerPlugin.logException("Create working copy: ", e);
+			}
+		}
+		return null;
+	}
+	/**
+	 * @param unit
+	 * @return
+	 * @throws JavaModelException if an exception occurs trying to retrieve the underlying resource
+	 */
+
+	private IProblemRequestor getProblemRequestor(ICompilationUnit unit) throws JavaModelException {
+		//Resources belonging to the default project can only report syntax errors, because the project classpath is incomplete
+		boolean reportOnlySyntaxErrors = unit.getResource().getProject().equals(JavaLanguageServerPlugin.getProjectsManager().getDefaultProject());
+		if (reportOnlySyntaxErrors) {
+			connection.showNotificationMessage(MessageType.Warning, "Classpath is incomplete. Only syntax errors will be reported.");
+		}
+		return new DiagnosticsHandler(connection, unit.getPrimary().getUnderlyingResource(), reportOnlySyntaxErrors);
+	}
+
+	/**
+	 * @param uri
+	 */
+	public static void discard(String uri) {
+		String path = null;
+		try {
+			path = new URI(uri).getPath();
+		} catch (URISyntaxException e) {
+			JavaLanguageServerPlugin.logException("Failed to resolve " + uri, e);
+		}
+		if (path != null) {
+			JDTUtils instance = getInstance();
+			if (instance != null) {
+				instance.discardUnit(path);
+			}
+		}
+	}
 }

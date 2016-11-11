@@ -17,6 +17,7 @@ import org.jboss.tools.langs.LogMessageParams;
 import org.jboss.tools.langs.ShowMessageParams;
 import org.jboss.tools.langs.base.LSPMethods;
 import org.jboss.tools.langs.base.LSPServer;
+import org.jboss.tools.langs.base.Message;
 import org.jboss.tools.langs.base.NotificationMessage;
 import org.jboss.tools.langs.ext.StatusReport;
 import org.jboss.tools.vscode.internal.ipc.CancelMonitor;
@@ -94,7 +95,7 @@ public class JavaClientConnection extends LSPServer{
 	 * @param msg
 	 */
 	public void showNotificationMessage(MessageType type, String msg){
-		if(msg == null ) return;
+		if(msg == null) return;
 		NotificationMessage<ShowMessageParams> message = new NotificationMessage<>();
 		message.setMethod(LSPMethods.WINDOW_SHOW_MESSAGE.getMethod());
 		message.setParams(new ShowMessageParams().withMessage(msg)
@@ -102,6 +103,14 @@ public class JavaClientConnection extends LSPServer{
 		send(message);
 	}
 
+	/* (non-Javadoc)
+	 * @see org.jboss.tools.langs.base.LSPServer#send(org.jboss.tools.langs.base.Message)
+	 */
+	@Override
+	public void send(Message message) {
+		if(connection == null) return;
+		super.send(message);
+	}
 	/**
 	 * Sends a status to the client to be presented to users
 	 * @param msg The status to send back to the client
@@ -164,7 +173,7 @@ public class JavaClientConnection extends LSPServer{
 	@Override
 	protected List<NotificationHandler<?, ?>> buildNotificationHandlers() {
 		List<NotificationHandler<?, ?>> $ = new ArrayList<>(5);
-		DocumentLifeCycleHandler dh = new DocumentLifeCycleHandler(this);
+		DocumentLifeCycleHandler dh = new DocumentLifeCycleHandler();
 		$.add(dh.new ChangeHandler());
 		$.add(dh.new ClosedHandler());
 		$.add(dh.new OpenHandler());

@@ -12,14 +12,9 @@ package org.jboss.tools.vscode.java.internal;
 
 import java.io.IOException;
 
-import org.eclipse.core.resources.IFile;
-import org.eclipse.core.resources.IResource;
 import org.eclipse.core.runtime.IStatus;
 import org.eclipse.core.runtime.Platform;
 import org.eclipse.core.runtime.Status;
-import org.eclipse.jdt.core.IBuffer;
-import org.eclipse.jdt.core.ICompilationUnit;
-import org.eclipse.jdt.core.WorkingCopyOwner;
 import org.jboss.tools.vscode.java.internal.managers.ProjectsManager;
 import org.osgi.framework.BundleActivator;
 import org.osgi.framework.BundleContext;
@@ -55,18 +50,8 @@ public class JavaLanguageServerPlugin implements BundleActivator {
 
 	private void startConnection() throws IOException {
 		connection = new JavaClientConnection(projectsManager);
+		JDTUtils.getInstance(connection);
 		connection.connect();
-
-		WorkingCopyOwner.setPrimaryBufferProvider(new WorkingCopyOwner() {
-			@Override
-			public IBuffer createBuffer(ICompilationUnit workingCopy) {
-				ICompilationUnit original= workingCopy.getPrimary();
-				IResource resource= original.getResource();
-				if (resource instanceof IFile)
-					return new DocumentAdapter(workingCopy, (IFile)resource);
-				return DocumentAdapter.Null;
-			}
-		});
 	}
 
 	/*
@@ -83,7 +68,6 @@ public class JavaLanguageServerPlugin implements BundleActivator {
 		projectsManager = null;
 		connection = null;
 		languageServer = null;
-
 	}
 
 	public JavaClientConnection getConnection(){

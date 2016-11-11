@@ -26,6 +26,7 @@ import org.eclipse.jdt.core.IJavaElement;
 import org.eclipse.jdt.core.IPackageDeclaration;
 import org.eclipse.jdt.core.IType;
 import org.jboss.tools.vscode.java.internal.managers.ProjectsManager;
+import org.junit.BeforeClass;
 import org.junit.Test;
 
 /**
@@ -33,6 +34,12 @@ import org.junit.Test;
  *
  */
 public class JDTUtilsTest extends AbstractWorkspaceTest {
+
+	@BeforeClass
+	public static void setup() {
+		JavaClientConnection connection = new JavaClientConnection(new ProjectsManager());
+		JDTUtils.getInstance(connection);
+	}
 
 	@Test
 	public void testGetPackageNameString() throws Exception {
@@ -59,7 +66,7 @@ public class JDTUtilsTest extends AbstractWorkspaceTest {
 	public void testResolveStandaloneCompilationUnit() throws Exception {
 		Path helloSrcRoot = Paths.get("projects", "eclipse", "hello", "src").toAbsolutePath();
 		URI uri = helloSrcRoot.resolve(Paths.get("java", "Foo.java")).toUri();
-		ICompilationUnit cu = JDTUtils.resolveCompilationUnit(uri.toString());
+		ICompilationUnit cu = JDTUtils.createCompilationUnit(uri.toString());
 		assertNotNull("Could not find compilation unit for " + uri, cu);
 		assertEquals(ProjectsManager.DEFAULT_PROJECT_NAME, cu.getResource().getProject().getName());
 		IJavaElement[] elements = cu.getChildren();
@@ -71,7 +78,7 @@ public class JDTUtilsTest extends AbstractWorkspaceTest {
 		assertEquals(1, resources.length);
 
 		uri = helloSrcRoot.resolve("NoPackage.java").toUri();
-		cu = JDTUtils.resolveCompilationUnit(uri.toString());
+		cu = JDTUtils.createCompilationUnit(uri.toString());
 		assertNotNull("Could not find compilation unit for " + uri, cu);
 		assertEquals(ProjectsManager.DEFAULT_PROJECT_NAME, cu.getResource().getProject().getName());
 		elements = cu.getChildren();
@@ -81,9 +88,9 @@ public class JDTUtilsTest extends AbstractWorkspaceTest {
 
 	@Test
 	public void testUnresolvableCompilationUnits() {
-		assertNull(JDTUtils.resolveCompilationUnit(null));
-		assertNull(JDTUtils.resolveCompilationUnit("foo/bar/Clazz.java"));
-		assertNull(JDTUtils.resolveCompilationUnit("file:///foo/bar/Clazz.java"));
+		assertNull(JDTUtils.createCompilationUnit(null));
+		assertNull(JDTUtils.createCompilationUnit("foo/bar/Clazz.java"));
+		assertNull(JDTUtils.createCompilationUnit("file:///foo/bar/Clazz.java"));
 	}
 
 }

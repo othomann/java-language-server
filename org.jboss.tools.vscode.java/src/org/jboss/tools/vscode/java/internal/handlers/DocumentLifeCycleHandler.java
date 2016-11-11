@@ -12,10 +12,6 @@ package org.jboss.tools.vscode.java.internal.handlers;
 
 import java.util.List;
 
-import org.eclipse.core.filebuffers.FileBuffers;
-import org.eclipse.core.filebuffers.ITextFileBuffer;
-import org.eclipse.core.filebuffers.ITextFileBufferManager;
-import org.eclipse.core.filebuffers.LocationKind;
 import org.eclipse.core.resources.IResource;
 import org.eclipse.core.resources.IWorkspaceRunnable;
 import org.eclipse.core.resources.ResourcesPlugin;
@@ -38,15 +34,11 @@ import org.jboss.tools.langs.DidSaveTextDocumentParams;
 import org.jboss.tools.langs.Range;
 import org.jboss.tools.langs.TextDocumentContentChangeEvent;
 import org.jboss.tools.langs.base.LSPMethods;
-import org.jboss.tools.vscode.internal.ipc.MessageType;
 import org.jboss.tools.vscode.internal.ipc.NotificationHandler;
 import org.jboss.tools.vscode.java.internal.JDTUtils;
-import org.jboss.tools.vscode.java.internal.JavaClientConnection;
 import org.jboss.tools.vscode.java.internal.JavaLanguageServerPlugin;
 
 public class DocumentLifeCycleHandler {
-
-	private JavaClientConnection connection;
 
 	public class ClosedHandler implements NotificationHandler<DidCloseTextDocumentParams, Object>{
 		@Override
@@ -55,12 +47,12 @@ public class DocumentLifeCycleHandler {
 		}
 
 		@Override
-		public Object handle(DidCloseTextDocumentParams param) {
+		public Object handle(DidCloseTextDocumentParams params) {
 			try {
 				ResourcesPlugin.getWorkspace().run(new IWorkspaceRunnable() {
 					@Override
 					public void run(IProgressMonitor monitor) throws CoreException {
-						handleClosed(param);
+						handleClosed(params, monitor);
 					}
 				}, new NullProgressMonitor());
 			} catch (CoreException e) {
@@ -79,12 +71,12 @@ public class DocumentLifeCycleHandler {
 		}
 
 		@Override
-		public Object handle(DidOpenTextDocumentParams param) {
+		public Object handle(DidOpenTextDocumentParams params) {
 			try {
 				ResourcesPlugin.getWorkspace().run(new IWorkspaceRunnable() {
 					@Override
 					public void run(IProgressMonitor monitor) throws CoreException {
-						handleOpen(param);
+						handleOpen(params, monitor);
 					}
 				}, new NullProgressMonitor());
 			} catch (CoreException e) {
@@ -102,12 +94,12 @@ public class DocumentLifeCycleHandler {
 		}
 
 		@Override
-		public Object handle(DidChangeTextDocumentParams param) {
+		public Object handle(DidChangeTextDocumentParams params) {
 			try {
 				ResourcesPlugin.getWorkspace().run(new IWorkspaceRunnable() {
 					@Override
 					public void run(IProgressMonitor monitor) throws CoreException {
-						handleChanged(param);
+						handleChanged(params, monitor);
 					}
 				}, new NullProgressMonitor());
 			} catch (CoreException e) {
@@ -125,19 +117,26 @@ public class DocumentLifeCycleHandler {
 		}
 
 		@Override
-		public Object handle(DidSaveTextDocumentParams param) {
-			// Nothing to do just keeping the clients happy with a response
+		public Object handle(DidSaveTextDocumentParams params) {
+			try {
+				ResourcesPlugin.getWorkspace().run(new IWorkspaceRunnable() {
+					@Override
+					public void run(IProgressMonitor monitor) throws CoreException {
+						handleSaved(params, monitor);
+					}
+				}, new NullProgressMonitor());
+			} catch (CoreException e) {
+				JavaLanguageServerPlugin.logException("Handle document open ", e);
+			}
 			return null;
 		}
 	}
 
-	public DocumentLifeCycleHandler(JavaClientConnection connection) {
-		this.connection = connection;
+	public DocumentLifeCycleHandler() {
 	}
 
-	private void handleOpen(DidOpenTextDocumentParams params) {
-		String uri = params.getTextDocument().getUri();
-		ICompilationUnit unit = JDTUtils.resolveCompilationUnit(uri);
+	private void handleOpen(DidOpenTextDocumentParams params, IProgressMonitor monitor) {
+		ICompilationUnit unit = JDTUtils.createCompilationUnit(params.getTextDocument().getUri());
 		if (unit == null || unit.getResource() == null) {
 			return;
 		}
@@ -146,42 +145,33 @@ public class DocumentLifeCycleHandler {
 			// checks if the underlying resource exists and refreshes to sync the newly created file.
 			if(!unit.getResource().isAccessible()){
 				try {
-					unit.getResource().refreshLocal(IResource.DEPTH_ONE, new NullProgressMonitor());
+					unit.getResource().refreshLocal(IResource.DEPTH_ONE, monitor);
 				} catch (CoreException e) {
 					// ignored
 				}
 			}
-			//Resources belonging to the default project can only report syntax errors, because the project classpath is incomplete
-			boolean reportOnlySyntaxErrors = unit.getResource().getProject().equals(JavaLanguageServerPlugin.getProjectsManager().getDefaultProject());
-			if (reportOnlySyntaxErrors) {
-				connection.showNotificationMessage(MessageType.Warning, "Classpath is incomplete. Only syntax errors will be reported.");
-			}
 
-			DiagnosticsHandler problemRequestor = new DiagnosticsHandler(connection, unit.getResource(), reportOnlySyntaxErrors);
-			unit.becomeWorkingCopy(problemRequestor, null);
 			IBuffer buffer = unit.getBuffer();
 			if(buffer != null) {
 				buffer.setContents(params.getTextDocument().getText());
 			}
 
 			// TODO: wire up cancellation.
-			unit.reconcile();
+			unit.reconcile(ICompilationUnit.NO_AST, true, unit.getOwner(), monitor);
 		} catch (JavaModelException e) {
-			JavaLanguageServerPlugin.logException("Creating working copy ",e);
+			JavaLanguageServerPlugin.logException("Document open: ",e);
 		}
 	}
 
-	private void handleChanged(DidChangeTextDocumentParams params) {
+	private void handleChanged(DidChangeTextDocumentParams params, IProgressMonitor monitor) {
 		ICompilationUnit unit = JDTUtils.resolveCompilationUnit(params.getTextDocument().getUri());
 
-		if (unit == null || !unit.isWorkingCopy()) {
+		if (unit == null) {
 			return;
 		}
 
-		ITextFileBufferManager manager= FileBuffers.getTextFileBufferManager();
-		ITextFileBuffer buffer = manager.getTextFileBuffer(unit.getResource().getFullPath(), LocationKind.IFILE);
-		IDocument document = buffer.getDocument();
 		try {
+			IDocument document = JsonRpcHelpers.toDocument(unit.getBuffer());
 			MultiTextEdit root = new MultiTextEdit();
 			List<TextDocumentContentChangeEvent> contentChanges = params.getContentChanges();
 			for (TextDocumentContentChangeEvent changeEvent : contentChanges) {
@@ -204,23 +194,28 @@ public class DocumentLifeCycleHandler {
 
 			if (root.hasChildren()) {
 				root.apply(document);
-				unit.reconcile();
+				unit.reconcile(ICompilationUnit.NO_AST, false, null, monitor);
 			}
 		} catch (JavaModelException e) {
+			JavaLanguageServerPlugin.logException("Document changed: ",e);
 		} catch (org.eclipse.jface.text.BadLocationException e) {
+			JavaLanguageServerPlugin.logException("Document changed: ",e);
 		}
 	}
 
-	private void handleClosed(DidCloseTextDocumentParams params) {
+	private void handleClosed(DidCloseTextDocumentParams params, IProgressMonitor monitor) {
 		JavaLanguageServerPlugin.logInfo("DocumentLifeCycleHandler.handleClosed");
 		String uri = params.getTextDocument().getUri();
-		ICompilationUnit unit = JDTUtils.resolveCompilationUnit(uri);
-		if (unit == null) {
-			return;
-		}
+		JDTUtils.discard(uri);
+	}
+
+	private void handleSaved(DidSaveTextDocumentParams params, IProgressMonitor monitor) {
+		JavaLanguageServerPlugin.logInfo("DocumentLifeCycleHandler.handleSaved");
+		ICompilationUnit unit = JDTUtils.resolveCompilationUnit(params.getTextDocument().getUri());
 		try {
-			unit.discardWorkingCopy();
-		} catch (CoreException e) {
+			unit.save(monitor, true);
+		} catch (JavaModelException e) {
+			JavaLanguageServerPlugin.logException("Document saved: ",e);
 		}
 	}
 }
