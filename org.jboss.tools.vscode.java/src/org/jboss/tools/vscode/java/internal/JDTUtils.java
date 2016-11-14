@@ -536,13 +536,16 @@ public final class JDTUtils {
 	 * @param uri
 	 * @return
 	 */
-	private synchronized ICompilationUnit createUnit( URI uri) {
+	private synchronized ICompilationUnit createUnit(URI uri) {
 		IJavaElement element = null;
 		IResource resource = findFile(uri);
 		if (resource == null) {
 			// unit not attached to a project yet
 			element = getFakeCompilationUnit(uri);
 		} else {
+			if(!ProjectUtils.isJavaProject(resource.getProject())){
+				return null;
+			}
 			element = JavaCore.create(resource);
 		}
 		if (element instanceof ICompilationUnit) {
