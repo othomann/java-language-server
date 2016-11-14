@@ -146,7 +146,7 @@ public final class JDTUtils {
 	 */
 	private synchronized void discardUnit(String path) {
 		ITypeRoot cachedValue = this.cache.remove(path);
-		if (cachedValue != null && cachedValue instanceof ICompilationUnit) {
+		if (cachedValue instanceof ICompilationUnit) {
 			try {
 				((ICompilationUnit) cachedValue).discardWorkingCopy();
 			} catch (JavaModelException e) {
@@ -162,7 +162,7 @@ public final class JDTUtils {
 	 */
 	private synchronized ICompilationUnit getCompilationUnit(URI uri) {
 		ITypeRoot cachedValue = this.cache.get(uri.getPath());
-		if (cachedValue != null && cachedValue instanceof ICompilationUnit) {
+		if (cachedValue instanceof ICompilationUnit) {
 			return (ICompilationUnit) cachedValue;
 		}
 		return null;
